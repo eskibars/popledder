@@ -17,9 +17,11 @@ from .protocol_builders import (
     build_m_header_packet,
     build_ystp01_from_image,
     build_gif_from_image,
-    build_bmp_from_image,
+    build_gif_normalized_from_bytes,
+    build_bmp24_from_image,
+    build_pkts_program_header_payload,
+    build_pkts_program_graphic_item_header,
     build_dispatch_play_payload,
-    build_delete_programs_payload,
 )
 
 def cmd_power_payload(on: bool) -> bytes:
@@ -31,11 +33,6 @@ def cmd_brightness_payload_fixed(value: int, type_: int = 0) -> bytes:
     if v <= 0:
         v = 15
     return bytes([0x06]) + encode_len(2) + bytes([type_ & 0xFF, v & 0xFF])
-
-def cmd_delete_programs(del_ids: List[int]) -> bytes:
-    """Build delete-programs payload. del_ids are 1-based program IDs (e.g. [1] to clear program 1)."""
-    return build_delete_programs_payload(del_ids=del_ids)
-
 
 def cmd_brightness_payload_schedule(entries: List[dict]) -> bytes:
     count = len(entries)
@@ -132,6 +129,7 @@ def rt_show_gif_payloads(
     control_mode_: str = "loop",
     control_value_: int = 0,
 ) -> List[bytes]:
+    rect_def = build_rect_def_payload(data_save=data_save, id_pro=id_pro, id_rect=id_rect)
     header = build_m_header_packet(
         data_save=data_save,
         id_pro=id_pro,
@@ -148,7 +146,7 @@ def rt_show_gif_payloads(
         data=gif_bytes,
         settings=settings,
     )
-    return [header] + stream_pkts
+    return [rect_def, header] + stream_pkts
 
 def rt_show_image_payloads(
     *,
@@ -164,16 +162,15 @@ def rt_show_image_payloads(
     control_value_: int = 0,
 ) -> List[bytes]:
     img = Image.open(io.BytesIO(image_bytes))
-    m = (mode or "bmp").lower().strip()
+    m = (mode or "gif").lower().strip()
     if m == "gif":
         data = build_gif_from_image(img, target_size=target_size, dither=False)
     elif m == "palette":
         data = build_ystp01_from_image(img, target_size=target_size, mode="palette")
-    elif m == "bmp":
-        data = build_bmp_from_image(img, target_size=target_size)
     else:
         data = build_ystp01_from_image(img, target_size=target_size, mode="rgb24")
 
+    rect_def = build_rect_def_payload(data_save=data_save, id_pro=id_pro, id_rect=id_rect)
     header = build_m_header_packet(
         data_save=data_save,
         id_pro=id_pro,
@@ -190,4 +187,91 @@ def rt_show_image_payloads(
         data=data,
         settings=settings,
     )
-    return [header] + stream_pkts
+    return [rect_def, header] + stream_pkts
+
+def pkts_program_gif_payloads(
+    *,
+    settings: Settings,
+    gif_bytes: bytes,
+    id_pro: int = 1,
+    id_rect: int = 1,
+    id_item: int = 1,
+    data_save: int = 0,
+    target_size: Optional[Tuple[int, int]] = (64, 64),
+) -> List[bytes]:
+    w, h = target_size if target_size else (64, 64)
+    program_header = build_pkts_program_header_payload(
+        data_save=data_save,
+        id_pro=id_pro,
+        id_rect=id_rect,
+        width=int(w),
+        height=int(h),
+    )
+    normalized_gif = build_gif_normalized_from_bytes(
+        gif_bytes,
+        target_size=target_size,
+        dither=False,
+    )
+    stream_pkts = stream_packets_for_bytes(
+        data_save=data_save,
+        id_pro=id_pro,
+        id_rect=id_rect,
+        id_item=id_item,
+        data=normalized_gif,
+        settings=settings,
+    )
+    # App effective wire order is program header, item header, then stream chunks.
+    item_header = build_pkts_program_graphic_item_header(
+        data_save=data_save,
+        id_pro=id_pro,
+        id_rect=id_rect,
+        id_item=id_item,
+        anim_time_stay=0,
+    )
+    return [program_header, item_header] + stream_pkts
+
+def pkts_program_image_payloads(
+    *,
+    settings: Settings,
+    image_bytes: bytes,
+    mode: str = "gif",
+    target_size: Optional[Tuple[int, int]] = (64, 64),
+    id_pro: int = 1,
+    id_rect: int = 1,
+    id_item: int = 1,
+    data_save: int = 0,
+) -> List[bytes]:
+    img = Image.open(io.BytesIO(image_bytes))
+    m = (mode or "gif").lower().strip()
+    is_source_gif = len(image_bytes) >= 3 and image_bytes[:3] == b"GIF"
+    if m == "gif" and is_source_gif:
+        # Preserve original animated GIF frames.
+        data = build_gif_normalized_from_bytes(image_bytes, target_size=target_size, dither=False)
+    else:
+        # Static image path: single-frame GIF transport is reliable on this panel.
+        data = build_gif_from_image(img, target_size=target_size, dither=False, clear_first=False)
+
+    w, h = target_size if target_size else img.size
+    program_header = build_pkts_program_header_payload(
+        data_save=data_save,
+        id_pro=id_pro,
+        id_rect=id_rect,
+        width=int(w),
+        height=int(h),
+    )
+    stream_pkts = stream_packets_for_bytes(
+        data_save=data_save,
+        id_pro=id_pro,
+        id_rect=id_rect,
+        id_item=id_item,
+        data=data,
+        settings=settings,
+    )
+    item_header = build_pkts_program_graphic_item_header(
+        data_save=data_save,
+        id_pro=id_pro,
+        id_rect=id_rect,
+        id_item=id_item,
+        anim_time_stay=0,
+    )
+    return [program_header, item_header] + stream_pkts

@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
-from PIL import Image
+from PIL import Image, ImageSequence
 import io
 
 from ..config import Settings
@@ -58,6 +58,98 @@ def build_m_header_packet(
 
     val = control_bytes(control_mode, control_value) + bytes([0x0A])
     out += tlv(17, val)
+    return bytes(out)
+
+def build_bmp24_from_image(
+    img: Image.Image,
+    *,
+    target_size: Optional[Tuple[int, int]] = (64, 64),
+) -> bytes:
+    """Build 24-bit BMP bytes matching the app's rgbtobmp() output."""
+    if target_size:
+        img = img.resize(tuple(target_size), Image.Resampling.NEAREST)
+    img = img.convert("RGBA")
+    w, h = img.size
+
+    row_stride = ((24 * w + 31) & ~31) // 8
+    pixel_bytes = row_stride * h
+    file_size = 54 + pixel_bytes
+
+    out = bytearray(file_size)
+    out[0:2] = b"BM"
+    out[2:6] = u16le(file_size & 0xFFFF) + u16le((file_size >> 16) & 0xFFFF)
+    out[10:14] = bytes([54, 0, 0, 0])
+    out[14:18] = bytes([40, 0, 0, 0])
+    out[18:22] = u16le(w & 0xFFFF) + u16le((w >> 16) & 0xFFFF)
+    out[22:26] = u16le(h & 0xFFFF) + u16le((h >> 16) & 0xFFFF)
+    out[26:28] = bytes([1, 0])
+    out[28:30] = bytes([24, 0])
+    out[34:38] = u16le((w * h * 3) & 0xFFFF) + u16le(((w * h * 3) >> 16) & 0xFFFF)
+
+    pix = list(img.getdata())
+    for y in range(h):
+        src_row = y * w
+        dst = 54 + row_stride * (h - 1 - y)
+        for x in range(w):
+            r, g, b, _a = pix[src_row + x]
+            out[dst] = b
+            out[dst + 1] = g
+            out[dst + 2] = r
+            dst += 3
+    return bytes(out)
+
+def build_pkts_program_header_payload(
+    *,
+    data_save: int,
+    id_pro: int,
+    id_rect: int,
+    width: int,
+    height: int,
+    x: int = 0,
+    y: int = 0,
+    type_bg: int = 0,
+    time_sync: int = 3,
+) -> bytes:
+    """
+    Minimal pkts_program header for one graphic region, equivalent to ae()+te() for type_pro=4.
+    """
+    p = id_to_wire_u8(id_pro)
+    ridx = id_to_wire_u8(id_rect)
+
+    out = bytearray()
+    out += bytes([8, 2, 0, p])
+    out += tlv_fixed_u8(9, 1 - int(data_save))
+    out += tlv_fixed_u8(12, p)
+    out += bytes([28, 4, type_bg & 0xFF, 2])
+    out += u16le(int(time_sync) & 0xFFFF)
+
+    out += bytes([13, 1, ridx, 29, 9])
+    out += u16le(int(x) & 0xFFFF)
+    out += u16le(int(y) & 0xFFFF)
+    out += u16le(int(width) & 0xFFFF)
+    out += u16le(int(height) & 0xFFFF)
+    out += bytes([0])
+    return bytes(out)
+
+def build_pkts_program_graphic_item_header(
+    *,
+    data_save: int,
+    id_pro: int,
+    id_rect: int,
+    id_item: int,
+    control_mode: str = "loop",
+    control_value: int = 1,
+    anim_type: int = 1,
+    anim_speed: int = 13,
+    anim_time_stay: int = 3,
+) -> bytes:
+    out = bytearray()
+    out += tlv_fixed_u8(9, 1 - int(data_save))
+    out += tlv_fixed_u8(12, id_to_wire_u8(id_pro))
+    out += tlv_fixed_u8(13, id_to_wire_u8(id_rect))
+    out += tlv_fixed_u8(14, id_to_wire_u8(id_item))
+    out += tlv(20, bytes([int(anim_type) & 0xFF, int(anim_speed) & 0xFF, int(anim_time_stay) & 0xFF]))
+    out += tlv(17, control_bytes(control_mode, control_value) + bytes([0x0A]))
     return bytes(out)
 
 def build_text_header_packet_minimal(
@@ -259,24 +351,6 @@ def stream_packets_for_bytes(
         ))
     return packets
 
-def build_delete_programs_payload(*, del_ids: Sequence[int]) -> bytes:
-    """Build delete command payload. del_ids are 1-based program IDs to delete.
-    Matches unminified.js: tag 8, encode_len(1+count), subtype 0, then (id-1) for each."""
-    ids = [max(1, int(x)) for x in del_ids]
-    if not ids:
-        return bytes([8, 1, 0])
-    count = len(ids)
-    s = 1 + count  # subtype byte + id bytes
-    enc = encode_len(s)
-    out = bytearray()
-    out += bytes([8])
-    out += enc
-    out += bytes([0])  # subtype: delete by program IDs
-    for i in ids:
-        out.append((i - 1) & 0xFF)
-    return bytes(out)
-
-
 def build_dispatch_play_payload(*, id_pro: int, play_loop: int = 1, ignore_pgm_cmd: int = 0) -> bytes:
     p = max(0, int(id_pro) - 1) & 0xFF
     loop = max(1, int(play_loop)) & 0xFFFF
@@ -403,41 +477,46 @@ def build_gif_from_image(
     )
     return buf.getvalue()
 
-
-def build_bmp_from_image(
-    img: Image.Image,
+def build_gif_normalized_from_bytes(
+    gif_bytes: bytes,
     *,
     target_size: Optional[Tuple[int, int]] = (64, 64),
+    dither: bool = False,
 ) -> bytes:
-    """Build 24-bit BMP from image. Matches unminified.js rgbtobmp() - the original
-    app sends BMP for graphics, not YSTP01 or GIF."""
-    if target_size:
-        img = img.resize(tuple(target_size), Image.Resampling.NEAREST)
-    img = img.convert("RGB")
-    w, h = img.size
+    """
+    Normalize an arbitrary GIF into a simple animated GIF stream that matches
+    what the panel parser handles reliably (palette, fixed disposal, loop=0).
+    """
+    src = Image.open(io.BytesIO(gif_bytes))
+    frames_p: List[Image.Image] = []
+    durations: List[int] = []
 
-    stride = ((24 * w + 31) & -32) // 8
-    data_size = stride * h
-    file_size = 54 + data_size
+    for fr in ImageSequence.Iterator(src):
+        rgba = fr.convert("RGBA")
+        if target_size:
+            rgba = rgba.resize(tuple(target_size), Image.Resampling.NEAREST)
+        frame_p = rgba.convert(
+            "P",
+            palette=Image.Palette.ADAPTIVE,
+            colors=256,
+            dither=Image.Dither.FLOYDSTEINBERG if dither else Image.Dither.NONE,
+        )
+        frames_p.append(frame_p)
+        d = int(fr.info.get("duration", src.info.get("duration", 40)) or 40)
+        durations.append(max(20, d))
 
-    out = bytearray(file_size)
-    out[0:2] = b"BM"
-    out[2:6] = bytes([file_size & 0xFF, (file_size >> 8) & 0xFF, (file_size >> 16) & 0xFF, (file_size >> 24) & 0xFF])
-    out[10:14] = bytes([54, 0, 0, 0])
-    out[14:18] = bytes([40, 0, 0, 0])
-    out[18:22] = bytes([w & 0xFF, (w >> 8) & 0xFF, (w >> 16) & 0xFF, (w >> 24) & 0xFF])
-    out[22:26] = bytes([h & 0xFF, (h >> 8) & 0xFF, (h >> 16) & 0xFF, (h >> 24) & 0xFF])
-    out[26:28] = bytes([1, 0])
-    out[28:30] = bytes([24, 0])
-    out[34:38] = bytes([(w * h * 3) & 0xFF, ((w * h * 3) >> 8) & 0xFF, ((w * h * 3) >> 16) & 0xFF, ((w * h * 3) >> 24) & 0xFF])
+    if not frames_p:
+        raise ValueError("GIF has no frames")
 
-    pixels = list(img.getdata())
-    pos = 54
-    for row_idx in range(h - 1, -1, -1):
-        for col in range(w):
-            r, g, b = pixels[row_idx * w + col]
-            out[pos : pos + 3] = bytes([b, g, r])
-            pos += 3
-        pos += stride - w * 3
-
-    return bytes(out)
+    buf = io.BytesIO()
+    frames_p[0].save(
+        buf,
+        format="GIF",
+        save_all=True,
+        append_images=frames_p[1:],
+        loop=0,
+        duration=durations,
+        disposal=2,
+        optimize=False,
+    )
+    return buf.getvalue()
