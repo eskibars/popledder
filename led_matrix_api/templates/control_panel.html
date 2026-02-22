@@ -1,0 +1,719 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>LED Matrix Control Panel</title>
+  <style>
+    :root {
+      --bg:#0b0f19; --card:#121a2b; --muted:#94a3b8; --text:#e2e8f0;
+      --ok:#22c55e; --bad:#ef4444; --btn:#2563eb; --btn2:#334155;
+      --border: rgba(148,163,184,.15);
+      --field: rgba(2,6,23,.6);
+    }
+    body { margin:0; font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial; background:var(--bg); color:var(--text); }
+    .wrap { max-width: 980px; margin: 0 auto; padding: 24px; }
+    h1 { margin: 0 0 16px; font-size: 22px; }
+    .grid { display:grid; grid-template-columns: 1fr; gap: 12px; }
+    @media (min-width: 900px) { .grid { grid-template-columns: 1fr 1fr; } }
+    .card { background:var(--card); border:1px solid var(--border); border-radius: 14px; padding: 16px; }
+    .card h2 { margin:0 0 12px; font-size: 16px; }
+    .row { display:flex; flex-wrap:wrap; gap: 10px; align-items:center; }
+    .row + .row { margin-top: 10px; }
+    .label { color: var(--muted); font-size: 12px; margin-bottom: 6px; }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace; font-size: 12px; word-break: break-all; }
+    button { border:0; border-radius: 10px; padding: 10px 12px; cursor:pointer; color:white; background: var(--btn); }
+    button.secondary { background: var(--btn2); }
+    button.danger { background: var(--bad); }
+    button:disabled { opacity:.55; cursor:not-allowed; }
+    input[type="text"], input[type="number"], input[type="file"], select, textarea {
+      width: 100%;
+      box-sizing: border-box;
+      padding: 10px 10px;
+      border-radius: 10px;
+      border: 1px solid rgba(148,163,184,.2);
+      background: var(--field);
+      color: var(--text);
+      font: inherit;
+    }
+    textarea { min-height: 78px; resize: vertical; }
+    input[type="range"] { width: 100%; }
+    input[type="color"] { width: 48px; height: 40px; padding:0; border-radius:10px; border:1px solid rgba(148,163,184,.2); background: transparent; }
+    .small { font-size: 12px; color: var(--muted); }
+    .pill { display:inline-flex; align-items:center; gap:8px; padding: 6px 10px; border-radius:999px; background: rgba(148,163,184,.12); }
+    .dot { width:10px; height:10px; border-radius:999px; background: var(--bad); }
+    .dot.ok { background: var(--ok); }
+    .out { margin-top: 10px; white-space: pre-wrap; background: var(--field); border:1px solid var(--border); padding: 10px; border-radius: 10px; }
+    .two { display:grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .three { display:grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; }
+    .block { border:1px dashed rgba(148,163,184,.25); border-radius:12px; padding:12px; }
+    .blockHead { display:flex; justify-content:space-between; align-items:center; gap:10px; margin-bottom:8px; }
+    .blockTitle { font-size: 13px; color: var(--muted); }
+    .inline { display:flex; align-items:center; gap:10px; }
+    .inline > * { flex: 1; }
+    .inline .fixed { flex: 0 0 auto; }
+    .hr { border:0; border-top:1px solid var(--border); margin:14px 0; }
+    .stickyBar { position: sticky; top: 0; background: linear-gradient(180deg, rgba(11,15,25,.98), rgba(11,15,25,.82)); padding: 10px 0; margin-bottom: 10px; z-index: 20; }
+  </style>
+</head>
+
+<body>
+  <div class="wrap">
+    <div class="stickyBar">
+      <h1>LED Matrix Control Panel</h1>
+      <div class="row">
+        <span class="pill">
+          <span id="connDot" class="dot"></span>
+          <span id="connText">Unknown</span>
+        </span>
+        <button id="btnRefresh" class="secondary">Refresh</button>
+        <button id="btnConnect">Connect</button>
+        <button id="btnDisconnect" class="danger">Disconnect</button>
+      </div>
+      <div class="row">
+        <div style="flex:1">
+          <div class="label">Device</div>
+          <div id="deviceAddr" class="mono">—</div>
+        </div>
+        <div style="flex:1">
+          <div class="label">Last notification (hex)</div>
+          <div id="lastNotif" class="mono">—</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="grid">
+      <!-- Power + Brightness -->
+      <div class="card">
+        <h2>Power & Brightness</h2>
+
+        <div class="row">
+          <button id="btnPowerOn">Power On</button>
+          <button id="btnPowerOff" class="secondary">Power Off</button>
+        </div>
+
+        <div class="row">
+          <div style="flex:1">
+            <div class="label">Brightness</div>
+            <input id="brightness" type="range" min="1" max="15" value="15" />
+            <div class="small">Value: <span id="brightnessVal">15</span> (1–15)</div>
+          </div>
+          <button id="btnBrightness" class="secondary">Send</button>
+        </div>
+
+        <div class="out" id="powerOut">—</div>
+      </div>
+
+      <!-- Image -->
+      <div class="card">
+        <h2>Send Image (single view)</h2>
+
+        <div class="row">
+          <div style="flex:1">
+            <div class="label">Upload image (png/jpg/gif supported)</div>
+            <input id="imgFile" type="file" accept="image/*" />
+          </div>
+        </div>
+
+        <div class="two">
+          <div>
+            <div class="label">Mode</div>
+            <select id="imgMode">
+              <option value="gif" selected>gif (most compatible)</option>
+              <option value="rgb24">rgb24 (ystp01 raw)</option>
+              <option value="palette">palette (ystp01 indexed)</option>
+            </select>
+
+          </div>
+          <div>
+            <div class="label">Resize</div>
+            <select id="imgSize">
+              <option value="64x64" selected>64×64</option>
+              <option value="32x32">32×32</option>
+              <option value="16x16">16×16</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="row" style="margin-top:10px;">
+          <button id="btnSendImage">Send Image</button>
+        </div>
+
+        <div class="out" id="mediaOut">—</div>
+      </div>
+
+      <!-- Text -->
+      <div class="card" style="grid-column: 1 / -1;">
+        <h2>Send Text (single view)</h2>
+
+        <div class="two">
+          <div>
+            <div class="label">Horizontal align</div>
+            <select id="alignH">
+              <option value="left" selected>left</option>
+              <option value="center">center</option>
+              <option value="right">right</option>
+            </select>
+          </div>
+          <div>
+            <div class="label">Vertical align</div>
+            <select id="alignV">
+              <option value="top" selected>top</option>
+              <option value="center">center</option>
+              <option value="bottom">bottom</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="three" style="margin-top:10px;">
+          <div>
+            <div class="label">Rotate</div>
+            <select id="rotate">
+              <option value="0" selected>0°</option>
+              <option value="90">90°</option>
+              <option value="180">180°</option>
+              <option value="270">270°</option>
+            </select>
+          </div>
+          <div>
+            <div class="label">Line spacing</div>
+            <input id="spaceLine" type="number" value="0" min="-128" max="127" />
+          </div>
+          <div>
+            <div class="label">Font spacing</div>
+            <input id="spaceFont" type="number" value="0" min="-128" max="127" />
+          </div>
+        </div>
+
+        <div class="three" style="margin-top:10px;">
+          <div>
+            <div class="label">Animation</div>
+            <select id="animSelect">
+              <option value="" selected>(none)</option>
+            </select>
+          </div>
+          <div>
+            <div class="label">Anim speed</div>
+            <input id="animSpeed" type="range" min="1" max="15" value="8" />
+            <div class="small">Value: <span id="animSpeedVal">8</span> (1–15)</div>
+          </div>
+          <div>
+            <div class="label">Stay time</div>
+            <input id="animStay" type="number" value="3" min="0" max="255" />
+            <div class="small">Seconds-ish (device-defined)</div>
+          </div>
+        </div>
+
+        <div class="row" style="margin-top:10px;">
+          <label class="pill" style="cursor:pointer;">
+            <input id="animEnable" type="checkbox" checked style="width:auto; margin:0;" />
+            <span class="small" style="margin:0;">Enable animation</span>
+          </label>
+          <button id="btnReloadAnims" class="secondary">Reload animations</button>
+          <span class="small" id="animMeta" style="margin-left:auto;">—</span>
+        </div>
+
+        <hr class="hr" />
+
+        <div class="row">
+          <div style="flex:1">
+            <div class="label">Single text (used when no blocks)</div>
+            <input id="singleText" type="text" placeholder="Hello" />
+          </div>
+        </div>
+
+        <div class="two" style="margin-top:10px;">
+          <div>
+            <div class="label">Size</div>
+            <input id="singleSize" type="number" value="16" min="1" max="64" />
+          </div>
+          <div>
+            <div class="label">Encoding code</div>
+            <input id="singleCode" type="number" value="1" min="0" max="255" />
+            <div class="small">code &lt; 16 = GBK path; otherwise UTF‑8</div>
+          </div>
+        </div>
+
+        <div class="two" style="margin-top:10px;">
+          <div>
+            <div class="label">Font</div>
+            <input id="singleFont" type="number" value="0" min="0" max="255" />
+          </div>
+          <div>
+            <div class="label">Colors</div>
+            <div class="inline">
+              <input id="singleFg" class="fixed" type="color" value="#ffffff" />
+              <input id="singleBg" class="fixed" type="color" value="#000000" />
+              <div class="mono" id="singleColorDec" style="flex:1; text-align:right;">fg 16777215 • bg 0</div>
+            </div>
+            <div class="small">Pickers are RGB; API sends decimal 0xRRGGBB.</div>
+          </div>
+        </div>
+
+        <hr class="hr" />
+
+        <div class="row">
+          <div style="flex:1">
+            <div class="label">Blocks (list_text)</div>
+            <div class="small">Add blocks to send mixed styles. If blocks exist, the single text above is ignored.</div>
+          </div>
+          <button id="btnAddBlock" class="secondary">Add Block</button>
+          <button id="btnClearBlocks" class="danger">Clear</button>
+        </div>
+
+        <div id="blocksWrap" class="row" style="flex-direction:column; align-items:stretch; gap:10px; margin-top:10px;"></div>
+
+        <div class="row" style="margin-top:10px;">
+          <button id="btnSendText">Send Text</button>
+          <button id="btnCopyJson" class="secondary">Copy JSON</button>
+        </div>
+
+        <div class="label" style="margin-top:10px;">Request JSON preview</div>
+        <div class="out mono" id="jsonPreview">{}</div>
+
+        <div class="label" style="margin-top:10px;">Response</div>
+        <div class="out" id="textOut">—</div>
+      </div>
+
+      <!-- Status JSON -->
+      <div class="card" style="grid-column: 1 / -1;">
+        <h2>Status JSON</h2>
+        <div class="out" id="statusOut">Loading…</div>
+      </div>
+    </div>
+  </div>
+
+<script>
+  const $ = (id) => document.getElementById(id);
+
+  function pretty(obj) {
+    try { return JSON.stringify(obj, null, 2); } catch { return String(obj); }
+  }
+
+  function clampInt(x, lo, hi) {
+    x = Number(x);
+    if (Number.isNaN(x)) return lo;
+    return Math.max(lo, Math.min(hi, x));
+  }
+
+  function hexToRgbInt(hex) {
+    // hex like "#RRGGBB" -> int 0xRRGGBB
+    const h = (hex || "#000000").replace("#", "");
+    if (h.length !== 6) return 0;
+    return parseInt(h, 16) >>> 0;
+  }
+
+  function rgbIntToDecString(rgbInt) {
+    return String((rgbInt >>> 0) & 0xFFFFFF);
+  }
+
+  async function api(path, opts = {}) {
+    const res = await fetch(path, {
+      headers: { "Content-Type": "application/json", ...(opts.headers || {}) },
+      ...opts,
+    });
+    let data;
+    try { data = await res.json(); }
+    catch { data = { ok: false, error: "Non-JSON response", status: res.status }; }
+    if (!res.ok) throw new Error(data?.error || `HTTP ${res.status}`);
+    return data;
+  }
+
+  // ---- Text animations (v5 API) ----
+  let TEXT_ANIMS = null;
+
+  function normKey(s) {
+    return String(s || "").trim().toLowerCase().replace(/[-\s]+/g, "_");
+  }
+
+  async function loadTextAnimations() {
+    $("animMeta").textContent = "Loading…";
+    try {
+      const r = await api("/api/text/animations", { method: "GET", headers: {} });
+      if (!r || !r.ok) throw new Error(r?.error || "Bad response");
+      TEXT_ANIMS = r;
+
+      const sel = $("animSelect");
+      const prev = sel.value;
+      sel.innerHTML = '<option value="" selected>(none)</option>';
+
+      const anims = Array.isArray(r.animations) ? r.animations.slice() : [];
+      anims.sort((a, b) => (a.id ?? 0) - (b.id ?? 0));
+
+      for (const a of anims) {
+        const aliases = Array.isArray(a.aliases) ? a.aliases : [];
+        // Prefer a short human alias; fall back to enum name.
+        const val = aliases[0] || a.name || String(a.id);
+        const label = `${a.id}: ${a.description || a.name || val}`;
+        const opt = document.createElement("option");
+        opt.value = val;
+        opt.textContent = label;
+        opt.dataset.id = String(a.id ?? "");
+        opt.dataset.name = String(a.name ?? "");
+        opt.dataset.desc = String(a.description ?? "");
+        opt.dataset.aliases = JSON.stringify(aliases);
+        sel.appendChild(opt);
+      }
+
+      // Restore selection if possible
+      if (prev) {
+        const want = normKey(prev);
+        const found = Array.from(sel.options).find(o => normKey(o.value) === want || normKey(o.dataset.name) === want);
+        if (found) sel.value = found.value;
+      }
+
+      const lo = r.speed_range?.[0] ?? 1;
+      const hi = r.speed_range?.[1] ?? 15;
+      $("animSpeed").min = String(lo);
+      $("animSpeed").max = String(hi);
+      $("animMeta").textContent = `Loaded ${anims.length} • speed ${lo}–${hi}`;
+    } catch (e) {
+      $("animMeta").textContent = `Anim load failed: ${e.message}`;
+    } finally {
+      updatePreview();
+    }
+  }
+
+  async function refreshStatus() {
+    $("statusOut").textContent = "Loading…";
+    try {
+      const s = await api("/api/status", { method: "GET", headers: {} });
+      $("statusOut").textContent = pretty(s);
+      $("deviceAddr").textContent = s.device || "—";
+      $("lastNotif").textContent = s.last_notification_hex || "—";
+
+      const connected = !!s.connected;
+      $("connText").textContent = connected ? "Connected" : "Disconnected";
+      $("connDot").classList.toggle("ok", connected);
+
+      $("btnConnect").disabled = connected;
+      $("btnDisconnect").disabled = !connected;
+    } catch (e) {
+      $("statusOut").textContent = `Error: ${e.message}`;
+      $("connText").textContent = "Error";
+      $("connDot").classList.remove("ok");
+    }
+  }
+
+  async function connect() {
+    $("statusOut").textContent = "Connecting…";
+    try { await api("/api/connect", { method: "POST", body: JSON.stringify({}) }); }
+    catch (e) { $("statusOut").textContent = `Error: ${e.message}`; }
+    finally { await refreshStatus(); }
+  }
+
+  async function disconnect() {
+    $("statusOut").textContent = "Disconnecting…";
+    try { await api("/api/disconnect", { method: "POST", body: JSON.stringify({}) }); }
+    catch (e) { $("statusOut").textContent = `Error: ${e.message}`; }
+    finally { await refreshStatus(); }
+  }
+
+  async function power(on) {
+    $("powerOut").textContent = "Sending…";
+    try {
+      const r = await api("/api/power", { method: "POST", body: JSON.stringify({ on }) });
+      $("powerOut").textContent = pretty(r);
+    } catch (e) {
+      $("powerOut").textContent = `Error: ${e.message}`;
+    } finally {
+      await refreshStatus();
+    }
+  }
+
+  async function sendBrightness() {
+    const value = Number($("brightness").value);
+    $("powerOut").textContent = "Sending…";
+    try {
+      const r = await api("/api/brightness", {
+        method: "POST",
+        body: JSON.stringify({ mode: "fixed", value, type: 0 })
+      });
+      $("powerOut").textContent = pretty(r);
+    } catch (e) {
+      $("powerOut").textContent = `Error: ${e.message}`;
+    } finally {
+      await refreshStatus();
+    }
+  }
+
+  // ---- Blocks UI ----
+  let blocks = [];
+
+  function blockTemplate(idx, b) {
+    const safe = (s) => String(s ?? "");
+    return `
+      <div class="block" data-idx="${idx}">
+        <div class="blockHead">
+          <div class="blockTitle">Block #${idx + 1}</div>
+          <div class="row" style="margin:0; gap:8px;">
+            <button class="secondary" data-act="up" ${idx===0 ? "disabled":""}>↑</button>
+            <button class="secondary" data-act="down" ${idx===blocks.length-1 ? "disabled":""}>↓</button>
+            <button class="danger" data-act="del">Delete</button>
+          </div>
+        </div>
+
+        <div class="row">
+          <div style="flex:1">
+            <div class="label">Text</div>
+            <input type="text" data-k="text" value="${safe(b.text)}" placeholder="Text for this block" />
+          </div>
+        </div>
+
+        <div class="three">
+          <div>
+            <div class="label">Size</div>
+            <input type="number" data-k="size" value="${safe(b.size)}" min="1" max="64" />
+          </div>
+          <div>
+            <div class="label">Code</div>
+            <input type="number" data-k="code" value="${safe(b.code)}" min="0" max="255" />
+          </div>
+          <div>
+            <div class="label">Font</div>
+            <input type="number" data-k="font" value="${safe(b.font)}" min="0" max="255" />
+          </div>
+        </div>
+
+        <div class="two" style="margin-top:10px;">
+          <div>
+            <div class="label">Font color</div>
+            <div class="inline">
+              <input class="fixed" type="color" data-k="fg_hex" value="${safe(b.fg_hex)}" />
+              <div class="mono" data-k="fg_dec" style="text-align:right;">${rgbIntToDecString(hexToRgbInt(b.fg_hex))}</div>
+            </div>
+          </div>
+          <div>
+            <div class="label">Background color</div>
+            <div class="inline">
+              <input class="fixed" type="color" data-k="bg_hex" value="${safe(b.bg_hex)}" />
+              <div class="mono" data-k="bg_dec" style="text-align:right;">${rgbIntToDecString(hexToRgbInt(b.bg_hex))}</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
+  function renderBlocks() {
+    const wrap = $("blocksWrap");
+    if (blocks.length === 0) {
+      wrap.innerHTML = `<div class="small">No blocks yet. Click “Add Block”.</div>`;
+    } else {
+      wrap.innerHTML = blocks.map((b, i) => blockTemplate(i, b)).join("");
+    }
+    updatePreview();
+  }
+
+  function addBlock() {
+    blocks.push({ text: "", size: 16, code: 1, font: 0, fg_hex: "#ffffff", bg_hex: "#000000" });
+    renderBlocks();
+  }
+
+  function clearBlocks() {
+    blocks = [];
+    renderBlocks();
+  }
+
+  function moveBlock(idx, dir) {
+    const j = idx + dir;
+    if (j < 0 || j >= blocks.length) return;
+    const tmp = blocks[idx];
+    blocks[idx] = blocks[j];
+    blocks[j] = tmp;
+    renderBlocks();
+  }
+
+  function deleteBlock(idx) {
+    blocks.splice(idx, 1);
+    renderBlocks();
+  }
+
+  $("blocksWrap").addEventListener("input", (ev) => {
+    const blockEl = ev.target.closest(".block");
+    if (!blockEl) return;
+    const idx = Number(blockEl.dataset.idx);
+    const k = ev.target.dataset.k;
+    if (Number.isNaN(idx) || !k) return;
+
+    const b = blocks[idx];
+    if (!b) return;
+
+    if (k === "text") b.text = ev.target.value;
+    if (k === "size") b.size = clampInt(ev.target.value, 1, 64);
+    if (k === "code") b.code = clampInt(ev.target.value, 0, 255);
+    if (k === "font") b.font = clampInt(ev.target.value, 0, 255);
+    if (k === "fg_hex") b.fg_hex = ev.target.value;
+    if (k === "bg_hex") b.bg_hex = ev.target.value;
+
+    // Update decimal labels if color changed
+    if (k === "fg_hex") blockEl.querySelector('[data-k="fg_dec"]').textContent = rgbIntToDecString(hexToRgbInt(b.fg_hex));
+    if (k === "bg_hex") blockEl.querySelector('[data-k="bg_dec"]').textContent = rgbIntToDecString(hexToRgbInt(b.bg_hex));
+
+    updatePreview();
+  });
+
+  $("blocksWrap").addEventListener("click", (ev) => {
+    const btn = ev.target.closest("button[data-act]");
+    if (!btn) return;
+    const blockEl = ev.target.closest(".block");
+    if (!blockEl) return;
+    const idx = Number(blockEl.dataset.idx);
+    const act = btn.dataset.act;
+    if (act === "up") moveBlock(idx, -1);
+    if (act === "down") moveBlock(idx, +1);
+    if (act === "del") deleteBlock(idx);
+  });
+
+  // ---- Single controls color label ----
+  function updateSingleColorLabel() {
+    const fg = hexToRgbInt($("singleFg").value);
+    const bg = hexToRgbInt($("singleBg").value);
+    $("singleColorDec").textContent = `fg ${rgbIntToDecString(fg)} • bg ${rgbIntToDecString(bg)}`;
+    updatePreview();
+  }
+
+  // ---- Build request JSON ----
+  function buildTextBody() {
+    const body = {
+      align_horizontal: $("alignH").value,
+      align_vertical: $("alignV").value,
+      rotate: Number($("rotate").value || 0),
+      space_line: Number($("spaceLine").value || 0),
+      space_font: Number($("spaceFont").value || 0),
+    };
+
+    if (blocks.length > 0) {
+      body.list_text = blocks.map(b => ({
+        text: String(b.text ?? ""),
+        size: clampInt(b.size, 1, 64),
+        code: clampInt(b.code, 0, 255),
+        font: clampInt(b.font, 0, 255),
+        color: hexToRgbInt(b.fg_hex),
+        color_bg: hexToRgbInt(b.bg_hex),
+      }));
+    } else {
+      body.text = $("singleText").value || "";
+      body.size = clampInt($("singleSize").value || 16, 1, 64);
+      body.code = clampInt($("singleCode").value || 1, 0, 255);
+      body.font = clampInt($("singleFont").value || 0, 0, 255);
+      body.font_color = hexToRgbInt($("singleFg").value);
+      body.bg_color = hexToRgbInt($("singleBg").value);
+    }
+
+    // Animation (optional)
+    const animOn = !!$("animEnable")?.checked;
+    const animVal = $("animSelect")?.value || "";
+    if (animOn && animVal) {
+      body.anim = animVal; // string alias or enum name supported by server
+      body.anim_speed = clampInt($("animSpeed").value, Number($("animSpeed").min || 1), Number($("animSpeed").max || 15));
+      body.anim_time_stay = clampInt($("animStay").value, 0, 255);
+    }
+
+    return body;
+  }
+
+  function updatePreview() {
+    $("jsonPreview").textContent = pretty(buildTextBody());
+  }
+
+  async function sendText() {
+    const body = buildTextBody();
+    $("textOut").textContent = "Sending…";
+    try {
+      const r = await api("/api/text", { method: "POST", body: JSON.stringify(body) });
+      $("textOut").textContent = pretty(r);
+    } catch (e) {
+      $("textOut").textContent = `Error: ${e.message}`;
+    } finally {
+      await refreshStatus();
+    }
+  }
+
+  async function copyJson() {
+    const txt = $("jsonPreview").textContent || "{}";
+    try {
+      await navigator.clipboard.writeText(txt);
+      $("textOut").textContent = "Copied JSON to clipboard.";
+    } catch (e) {
+      $("textOut").textContent = `Copy failed: ${e.message}`;
+    }
+  }
+
+  async function sendImage() {
+    const f = $("imgFile").files[0];
+    if (!f) {
+      $("mediaOut").textContent = "Pick an image file first.";
+      return;
+    }
+    $("mediaOut").textContent = "Uploading…";
+
+    const mode = $("imgMode").value;
+    const size = $("imgSize").value; // "64x64"
+    const [w, h] = size.split("x").map(Number);
+
+    const fd = new FormData();
+    fd.append("file", f);
+    fd.append("mode", mode);
+    fd.append("w", String(w));
+    fd.append("h", String(h));
+
+    try {
+      const res = await fetch("/api/image", { method: "POST", body: fd });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error || `HTTP ${res.status}`);
+      $("mediaOut").textContent = pretty(data);
+    } catch (e) {
+      $("mediaOut").textContent = `Error: ${e.message}`;
+    } finally {
+      await refreshStatus();
+    }
+  }
+
+  // wire up
+  $("btnRefresh").addEventListener("click", refreshStatus);
+  $("btnConnect").addEventListener("click", connect);
+  $("btnDisconnect").addEventListener("click", disconnect);
+
+  $("btnPowerOn").addEventListener("click", () => power(true));
+  $("btnPowerOff").addEventListener("click", () => power(false));
+
+  $("brightness").addEventListener("input", () => $("brightnessVal").textContent = $("brightness").value);
+  $("btnBrightness").addEventListener("click", sendBrightness);
+
+  // text animations
+  $("animSpeed").addEventListener("input", () => {
+    $("animSpeedVal").textContent = $("animSpeed").value;
+    updatePreview();
+  });
+  $("animSelect").addEventListener("change", updatePreview);
+  $("animEnable").addEventListener("change", updatePreview);
+  $("animStay").addEventListener("input", updatePreview);
+  $("btnReloadAnims").addEventListener("click", loadTextAnimations);
+
+
+  $("btnSendImage").addEventListener("click", sendImage);
+
+  $("btnSendText").addEventListener("click", sendText);
+  $("btnCopyJson").addEventListener("click", copyJson);
+
+  $("btnAddBlock").addEventListener("click", addBlock);
+  $("btnClearBlocks").addEventListener("click", clearBlocks);
+
+  $("singleFg").addEventListener("input", updateSingleColorLabel);
+  $("singleBg").addEventListener("input", updateSingleColorLabel);
+
+  // update preview on other controls
+  ["alignH","alignV","rotate","spaceLine","spaceFont","singleText","singleSize","singleCode","singleFont"]
+    .forEach(id => $(id).addEventListener("input", updatePreview));
+  ["alignH","alignV","rotate"].forEach(id => $(id).addEventListener("change", updatePreview));
+
+  // initial
+  updateSingleColorLabel();
+  renderBlocks();
+  $("animSpeedVal").textContent = $("animSpeed").value;
+  loadTextAnimations();
+  refreshStatus();
+</script>
+</body>
+</html>
