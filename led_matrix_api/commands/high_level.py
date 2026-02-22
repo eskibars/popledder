@@ -6,7 +6,6 @@ import io
 from PIL import Image
 
 from ..config import Settings
-from ..models.animations import clamp_anim_speed, parse_text_animation
 from ..protocol.encoding import encode_len
 
 from .protocol_builders import (
@@ -14,14 +13,10 @@ from .protocol_builders import (
     build_text_header_packet_minimal,
     build_text_stream_bytes,
     stream_packets_for_bytes,
-    build_m_header_packet,
-    build_ystp01_from_image,
     build_gif_from_image,
     build_gif_normalized_from_bytes,
-    build_bmp24_from_image,
     build_pkts_program_header_payload,
     build_pkts_program_graphic_item_header,
-    build_dispatch_play_payload,
 )
 
 def cmd_power_payload(on: bool) -> bytes:
@@ -118,77 +113,6 @@ def rt_show_text_payloads(
     rect_def = build_rect_def_payload(data_save=data_save, id_pro=id_pro, id_rect=id_rect)
     return [rect_def, header] + stream_pkts
 
-def rt_show_gif_payloads(
-    *,
-    settings: Settings,
-    gif_bytes: bytes,
-    id_pro: int = 1,
-    id_rect: int = 1,
-    id_item: int = 1,
-    data_save: int = 0,
-    control_mode_: str = "loop",
-    control_value_: int = 0,
-) -> List[bytes]:
-    rect_def = build_rect_def_payload(data_save=data_save, id_pro=id_pro, id_rect=id_rect)
-    header = build_m_header_packet(
-        data_save=data_save,
-        id_pro=id_pro,
-        id_rect=id_rect,
-        id_item=id_item,
-        control_mode=control_mode_,
-        control_value=control_value_,
-    )
-    stream_pkts = stream_packets_for_bytes(
-        data_save=data_save,
-        id_pro=id_pro,
-        id_rect=id_rect,
-        id_item=id_item,
-        data=gif_bytes,
-        settings=settings,
-    )
-    return [rect_def, header] + stream_pkts
-
-def rt_show_image_payloads(
-    *,
-    settings: Settings,
-    image_bytes: bytes,
-    mode: str = "gif",
-    target_size: Optional[Tuple[int, int]] = (64, 64),
-    id_pro: int = 1,
-    id_rect: int = 1,
-    id_item: int = 1,
-    data_save: int = 0,
-    control_mode_: str = "loop",
-    control_value_: int = 0,
-) -> List[bytes]:
-    img = Image.open(io.BytesIO(image_bytes))
-    m = (mode or "gif").lower().strip()
-    if m == "gif":
-        data = build_gif_from_image(img, target_size=target_size, dither=False)
-    elif m == "palette":
-        data = build_ystp01_from_image(img, target_size=target_size, mode="palette")
-    else:
-        data = build_ystp01_from_image(img, target_size=target_size, mode="rgb24")
-
-    rect_def = build_rect_def_payload(data_save=data_save, id_pro=id_pro, id_rect=id_rect)
-    header = build_m_header_packet(
-        data_save=data_save,
-        id_pro=id_pro,
-        id_rect=id_rect,
-        id_item=id_item,
-        control_mode=control_mode_,
-        control_value=control_value_,
-    )
-    stream_pkts = stream_packets_for_bytes(
-        data_save=data_save,
-        id_pro=id_pro,
-        id_rect=id_rect,
-        id_item=id_item,
-        data=data,
-        settings=settings,
-    )
-    return [rect_def, header] + stream_pkts
-
 def pkts_program_gif_payloads(
     *,
     settings: Settings,
@@ -220,7 +144,7 @@ def pkts_program_gif_payloads(
         data=normalized_gif,
         settings=settings,
     )
-    # App effective wire order is program header, item header, then stream chunks.
+    
     item_header = build_pkts_program_graphic_item_header(
         data_save=data_save,
         id_pro=id_pro,

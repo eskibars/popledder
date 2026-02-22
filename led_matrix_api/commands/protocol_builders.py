@@ -15,7 +15,6 @@ from ..protocol.encoding import (
     rgb3,
     rgb24_swap_rb,
 )
-from ..models.animations import clamp_anim_speed, parse_text_animation
 
 def build_rect_def_payload(*, data_save: int, id_pro: int, id_rect: int, x: int = 0, y: int = 0, w: int = 64, h: int = 64, n_flag: int = 0) -> bytes:
     b = bytearray()
@@ -33,70 +32,6 @@ def build_rect_def_payload(*, data_save: int, id_pro: int, id_rect: int, x: int 
 def control_bytes(mode: str, value: int) -> bytes:
     m = 0 if mode == "loop" else 1
     return bytes([m & 0xFF]) + u16le(int(value) & 0xFFFF)
-
-def build_m_header_packet(
-    *,
-    data_save: int,
-    id_pro: int,
-    id_rect: int,
-    id_item: int,
-    control_mode: str,
-    control_value: int,
-    anim: Optional[dict] = None,
-) -> bytes:
-    out = bytearray()
-    out += tlv_fixed_u8(9, 1 - int(data_save))
-    out += tlv_fixed_u8(12, id_to_wire_u8(id_pro))
-    out += tlv_fixed_u8(13, id_to_wire_u8(id_rect))
-    out += tlv_fixed_u8(14, id_to_wire_u8(id_item))
-
-    if anim:
-        a_type = int(anim.get("type", 0)) & 0xFF
-        speed = int(anim.get("speed", 0)) & 0xFF
-        time_stay = int(anim.get("time_stay", 0)) & 0xFF
-        out += tlv(20, bytes([a_type, speed, 0x00, time_stay]))
-
-    val = control_bytes(control_mode, control_value) + bytes([0x0A])
-    out += tlv(17, val)
-    return bytes(out)
-
-def build_bmp24_from_image(
-    img: Image.Image,
-    *,
-    target_size: Optional[Tuple[int, int]] = (64, 64),
-) -> bytes:
-    """Build 24-bit BMP bytes matching the app's rgbtobmp() output."""
-    if target_size:
-        img = img.resize(tuple(target_size), Image.Resampling.NEAREST)
-    img = img.convert("RGBA")
-    w, h = img.size
-
-    row_stride = ((24 * w + 31) & ~31) // 8
-    pixel_bytes = row_stride * h
-    file_size = 54 + pixel_bytes
-
-    out = bytearray(file_size)
-    out[0:2] = b"BM"
-    out[2:6] = u16le(file_size & 0xFFFF) + u16le((file_size >> 16) & 0xFFFF)
-    out[10:14] = bytes([54, 0, 0, 0])
-    out[14:18] = bytes([40, 0, 0, 0])
-    out[18:22] = u16le(w & 0xFFFF) + u16le((w >> 16) & 0xFFFF)
-    out[22:26] = u16le(h & 0xFFFF) + u16le((h >> 16) & 0xFFFF)
-    out[26:28] = bytes([1, 0])
-    out[28:30] = bytes([24, 0])
-    out[34:38] = u16le((w * h * 3) & 0xFFFF) + u16le(((w * h * 3) >> 16) & 0xFFFF)
-
-    pix = list(img.getdata())
-    for y in range(h):
-        src_row = y * w
-        dst = 54 + row_stride * (h - 1 - y)
-        for x in range(w):
-            r, g, b, _a = pix[src_row + x]
-            out[dst] = b
-            out[dst + 1] = g
-            out[dst + 2] = r
-            dst += 3
-    return bytes(out)
 
 def build_pkts_program_header_payload(
     *,
@@ -356,86 +291,6 @@ def build_dispatch_play_payload(*, id_pro: int, play_loop: int = 1, ignore_pgm_c
     loop = max(1, int(play_loop)) & 0xFFFF
     play_mode = 0
     return bytes([24, 6, 2, p, ignore_pgm_cmd & 0xFF, play_mode, loop & 0xFF, (loop >> 8) & 0xFF])
-
-def build_ystp01_from_image(
-    img: Image.Image,
-    *,
-    target_size: Optional[Tuple[int, int]] = (64, 64),
-    mode: str = "rgb24",
-    max_colors: int = 256,
-) -> bytes:
-    if target_size:
-        img = img.resize(tuple(target_size), Image.Resampling.NEAREST)
-    img = img.convert("RGB")
-    w, h = img.size
-
-    mode = (mode or "rgb24").lower().strip()
-    if mode not in ("rgb24", "palette"):
-        mode = "rgb24"
-
-    if mode == "rgb24":
-        raw = bytearray()
-        for (r, g, b) in list(img.getdata()):
-            raw += bytes([r, g, b])
-        header = bytearray()
-        header += b"YSTP01"
-        header += u16le(w)
-        header += u16le(h)
-        header += u16le(1)
-        header += u16le(0)
-        header += bytes([24])
-        return bytes(header + raw)
-
-    pal_img = img.convert("P", palette=Image.Palette.ADAPTIVE, colors=max_colors)
-
-    color_count = min(max_colors, 256)
-    if color_count <= 2:
-        o = 1
-    elif color_count <= 4:
-        o = 2
-    elif color_count <= 16:
-        o = 4
-    else:
-        o = 8
-
-    palette = pal_img.getpalette() or []
-    needed_entries = 1 << o
-    pal_bytes = bytearray()
-    for i in range(needed_entries):
-        base = 3 * i
-        r = palette[base + 0] if base + 0 < len(palette) else 0
-        g = palette[base + 1] if base + 1 < len(palette) else 0
-        b = palette[base + 2] if base + 2 < len(palette) else 0
-        pal_bytes += bytes([r, g, b])
-
-    idxs = list(pal_img.getdata())
-
-    packed = bytearray()
-    if o == 8:
-        packed += bytes(idxs)
-    else:
-        per_byte = 8 // o
-        mask = (1 << o) - 1
-        for y in range(h):
-            row = idxs[y*w:(y+1)*w]
-            i = 0
-            while i < len(row):
-                acc = 0
-                for _ in range(per_byte):
-                    acc <<= o
-                    if i < len(row):
-                        acc |= (row[i] & mask)
-                    i += 1
-                packed.append(acc & 0xFF)
-
-    header = bytearray()
-    header += b"YSTP01"
-    header += u16le(w)
-    header += u16le(h)
-    header += u16le(1)
-    header += u16le(len(pal_bytes))
-    header += bytes([o & 0xFF])
-    return bytes(header + pal_bytes + packed)
 
 def build_gif_from_image(
     img: Image.Image,

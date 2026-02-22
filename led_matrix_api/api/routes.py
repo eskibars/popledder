@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 from typing import Any, Dict, List
+from pathlib import Path
 
 from flask import Blueprint, jsonify, request, render_template
+from werkzeug.utils import secure_filename
 
 from ..ble.service import LedBleService
 from ..config import Settings
@@ -17,6 +19,38 @@ from ..commands.high_level import (
 from ..commands.protocol_builders import build_dispatch_play_payload
 from ..models.animations import TextAnimation, TEXT_ANIMATION_ALIASES, TEXT_ANIMATION_DESCRIPTIONS, parse_text_animation, clamp_anim_speed
 from ..utils.hex import ack_to_dict
+
+PRESET_IMAGE_DIR = Path(__file__).resolve().parents[1] / "static" / "presets"
+PRESET_IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp"}
+
+
+def _list_preset_image_names() -> List[str]:
+    if not PRESET_IMAGE_DIR.is_dir():
+        return []
+    names: List[str] = []
+    for p in PRESET_IMAGE_DIR.iterdir():
+        if not p.is_file():
+            continue
+        if p.suffix.lower() in PRESET_IMAGE_EXTENSIONS:
+            names.append(p.name)
+    names.sort()
+    return names
+
+
+def _resolve_preset_image(name: str) -> Path | None:
+    safe_name = secure_filename(name or "")
+    if not safe_name:
+        return None
+    candidate = (PRESET_IMAGE_DIR / safe_name).resolve()
+    try:
+        candidate.relative_to(PRESET_IMAGE_DIR.resolve())
+    except ValueError:
+        return None
+    if not candidate.is_file():
+        return None
+    if candidate.suffix.lower() not in PRESET_IMAGE_EXTENSIONS:
+        return None
+    return candidate
 
 def make_blueprint(*, ble: LedBleService | None, settings: Settings) -> Blueprint:
     bp = Blueprint("matrix", __name__)
@@ -220,6 +254,47 @@ def make_blueprint(*, ble: LedBleService | None, settings: Settings) -> Blueprin
             msg_type = int(request.form.get("msg_type", settings.rt_show_type))
             res = ble.send_many_payloads(flags=settings.rt_show_flags, msg_type=msg_type, payloads=payloads)
             return jsonify({"ok": True, "sent_count": len(res), "sent": res})
+        except Exception as e:
+            return jsonify({"ok": False, "error": str(e)}), 500
+
+    @bp.get("/api/image/presets")
+    def api_image_presets():
+        return jsonify({"ok": True, "images": _list_preset_image_names()})
+
+    @bp.post("/api/image/preset")
+    def api_image_preset():
+        if not ble:
+            return jsonify({"ok": False, "error": "DEVICE_ADDRESS not set"}), 500
+        body = request.get_json(force=True, silent=True) or {}
+        name = str(body.get("name", "")).strip()
+        if not name:
+            return jsonify({"ok": False, "error": "name is required"}), 400
+        preset_path = _resolve_preset_image(name)
+        if not preset_path:
+            return jsonify({"ok": False, "error": f"preset image not found: {name}"}), 404
+
+        try:
+            if not ble.is_connected():
+                ble.connect()
+            image_bytes = preset_path.read_bytes()
+            payloads = pkts_program_image_payloads(
+                settings=settings,
+                image_bytes=image_bytes,
+                mode=str(body.get("mode", "gif")),
+                target_size=(int(body.get("w", 64)), int(body.get("h", 64))),
+                id_pro=int(body.get("id_pro", 1)),
+                id_rect=int(body.get("id_rect", 1)),
+                id_item=int(body.get("id_item", 1)),
+                data_save=int(body.get("data_save", 0)),
+            )
+            msg_type = int(body.get("msg_type", settings.rt_show_type))
+            res = ble.send_many_payloads(flags=settings.rt_show_flags, msg_type=msg_type, payloads=payloads)
+            return jsonify({
+                "ok": True,
+                "preset": preset_path.name,
+                "sent_count": len(res),
+                "sent": res,
+            })
         except Exception as e:
             return jsonify({"ok": False, "error": str(e)}), 500
 
