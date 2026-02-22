@@ -2,8 +2,9 @@ from __future__ import annotations
 
 from typing import Iterable
 
-MAGIC0 = 0xAA
-MAGIC1 = 0x55
+MAGIC = b"\xAA\x55"
+MAGIC0 = MAGIC[0]
+MAGIC1 = MAGIC[1]
 
 def u16le_from(buf: bytes, off: int) -> int:
     return buf[off] | (buf[off + 1] << 8)

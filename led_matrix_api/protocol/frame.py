@@ -4,9 +4,7 @@ import time
 from dataclasses import dataclass
 from typing import List, Optional
 
-from .encoding import MAGIC0, MAGIC1, u16le_from, u16le, checksum16_sum
-
-MAGIC = b"\xAA\x55"
+from .encoding import MAGIC, MAGIC0, MAGIC1, u16le_from, u16le, checksum16_sum
 FFFF  = b"\xFF\xFF"
 
 @dataclass
