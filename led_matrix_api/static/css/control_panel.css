@@ -1,0 +1,226 @@
+:root {
+  --bg:#0b0f19;
+  --card:#121a2b;
+  --muted:#94a3b8;
+  --text:#e2e8f0;
+  --ok:#22c55e;
+  --bad:#ef4444;
+  --btn:#2563eb;
+  --btn2:#334155;
+  --border: rgba(148,163,184,.15);
+  --field: rgba(2,6,23,.6);
+}
+
+body {
+  margin: 0;
+  font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial;
+  background: var(--bg);
+  color: var(--text);
+}
+
+.wrap {
+  max-width: 980px;
+  margin: 0 auto;
+  padding: 24px;
+}
+
+h1 {
+  margin: 0 0 16px;
+  font-size: 22px;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 12px;
+}
+
+@media (min-width: 900px) {
+  .grid {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+.card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 16px;
+}
+
+.card h2 {
+  margin: 0 0 12px;
+  font-size: 16px;
+}
+
+.row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+}
+
+.row + .row {
+  margin-top: 10px;
+}
+
+.label {
+  color: var(--muted);
+  font-size: 12px;
+  margin-bottom: 6px;
+}
+
+.mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  font-size: 12px;
+  word-break: break-all;
+}
+
+button {
+  border: 0;
+  border-radius: 10px;
+  padding: 10px 12px;
+  cursor: pointer;
+  color: white;
+  background: var(--btn);
+}
+
+button.secondary {
+  background: var(--btn2);
+}
+
+button.danger {
+  background: var(--bad);
+}
+
+button:disabled {
+  opacity: .55;
+  cursor: not-allowed;
+}
+
+input[type="text"],
+input[type="number"],
+input[type="file"],
+select,
+textarea {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 10px 10px;
+  border-radius: 10px;
+  border: 1px solid rgba(148,163,184,.2);
+  background: var(--field);
+  color: var(--text);
+  font: inherit;
+}
+
+textarea {
+  min-height: 78px;
+  resize: vertical;
+}
+
+input[type="range"] {
+  width: 100%;
+}
+
+input[type="color"] {
+  width: 48px;
+  height: 40px;
+  padding: 0;
+  border-radius: 10px;
+  border: 1px solid rgba(148,163,184,.2);
+  background: transparent;
+}
+
+.small {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-radius: 999px;
+  background: rgba(148,163,184,.12);
+}
+
+.dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  background: var(--bad);
+}
+
+.dot.ok {
+  background: var(--ok);
+}
+
+.out {
+  margin-top: 10px;
+  white-space: pre-wrap;
+  background: var(--field);
+  border: 1px solid var(--border);
+  padding: 10px;
+  border-radius: 10px;
+}
+
+.two {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.three {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 10px;
+}
+
+.block {
+  border: 1px dashed rgba(148,163,184,.25);
+  border-radius: 12px;
+  padding: 12px;
+}
+
+.blockHead {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.blockTitle {
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.inline {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.inline > * {
+  flex: 1;
+}
+
+.inline .fixed {
+  flex: 0 0 auto;
+}
+
+.hr {
+  border: 0;
+  border-top: 1px solid var(--border);
+  margin: 14px 0;
+}
+
+.stickyBar {
+  position: sticky;
+  top: 0;
+  background: linear-gradient(180deg, rgba(11,15,25,.98), rgba(11,15,25,.82));
+  padding: 10px 0;
+  margin-bottom: 10px;
+  z-index: 20;
+}
