@@ -17,7 +17,9 @@ from .protocol_builders import (
     build_m_header_packet,
     build_ystp01_from_image,
     build_gif_from_image,
+    build_bmp_from_image,
     build_dispatch_play_payload,
+    build_delete_programs_payload,
 )
 
 def cmd_power_payload(on: bool) -> bytes:
@@ -29,6 +31,11 @@ def cmd_brightness_payload_fixed(value: int, type_: int = 0) -> bytes:
     if v <= 0:
         v = 15
     return bytes([0x06]) + encode_len(2) + bytes([type_ & 0xFF, v & 0xFF])
+
+def cmd_delete_programs(del_ids: List[int]) -> bytes:
+    """Build delete-programs payload. del_ids are 1-based program IDs (e.g. [1] to clear program 1)."""
+    return build_delete_programs_payload(del_ids=del_ids)
+
 
 def cmd_brightness_payload_schedule(entries: List[dict]) -> bytes:
     count = len(entries)
@@ -157,11 +164,13 @@ def rt_show_image_payloads(
     control_value_: int = 0,
 ) -> List[bytes]:
     img = Image.open(io.BytesIO(image_bytes))
-    m = (mode or "gif").lower().strip()
+    m = (mode or "bmp").lower().strip()
     if m == "gif":
         data = build_gif_from_image(img, target_size=target_size, dither=False)
     elif m == "palette":
         data = build_ystp01_from_image(img, target_size=target_size, mode="palette")
+    elif m == "bmp":
+        data = build_bmp_from_image(img, target_size=target_size)
     else:
         data = build_ystp01_from_image(img, target_size=target_size, mode="rgb24")
 

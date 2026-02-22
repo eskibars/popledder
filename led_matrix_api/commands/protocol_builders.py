@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from PIL import Image
 import io
@@ -259,6 +259,24 @@ def stream_packets_for_bytes(
         ))
     return packets
 
+def build_delete_programs_payload(*, del_ids: Sequence[int]) -> bytes:
+    """Build delete command payload. del_ids are 1-based program IDs to delete.
+    Matches unminified.js: tag 8, encode_len(1+count), subtype 0, then (id-1) for each."""
+    ids = [max(1, int(x)) for x in del_ids]
+    if not ids:
+        return bytes([8, 1, 0])
+    count = len(ids)
+    s = 1 + count  # subtype byte + id bytes
+    enc = encode_len(s)
+    out = bytearray()
+    out += bytes([8])
+    out += enc
+    out += bytes([0])  # subtype: delete by program IDs
+    for i in ids:
+        out.append((i - 1) & 0xFF)
+    return bytes(out)
+
+
 def build_dispatch_play_payload(*, id_pro: int, play_loop: int = 1, ignore_pgm_cmd: int = 0) -> bytes:
     p = max(0, int(id_pro) - 1) & 0xFF
     loop = max(1, int(play_loop)) & 0xFFFF
@@ -384,3 +402,42 @@ def build_gif_from_image(
         optimize=False,
     )
     return buf.getvalue()
+
+
+def build_bmp_from_image(
+    img: Image.Image,
+    *,
+    target_size: Optional[Tuple[int, int]] = (64, 64),
+) -> bytes:
+    """Build 24-bit BMP from image. Matches unminified.js rgbtobmp() - the original
+    app sends BMP for graphics, not YSTP01 or GIF."""
+    if target_size:
+        img = img.resize(tuple(target_size), Image.Resampling.NEAREST)
+    img = img.convert("RGB")
+    w, h = img.size
+
+    stride = ((24 * w + 31) & -32) // 8
+    data_size = stride * h
+    file_size = 54 + data_size
+
+    out = bytearray(file_size)
+    out[0:2] = b"BM"
+    out[2:6] = bytes([file_size & 0xFF, (file_size >> 8) & 0xFF, (file_size >> 16) & 0xFF, (file_size >> 24) & 0xFF])
+    out[10:14] = bytes([54, 0, 0, 0])
+    out[14:18] = bytes([40, 0, 0, 0])
+    out[18:22] = bytes([w & 0xFF, (w >> 8) & 0xFF, (w >> 16) & 0xFF, (w >> 24) & 0xFF])
+    out[22:26] = bytes([h & 0xFF, (h >> 8) & 0xFF, (h >> 16) & 0xFF, (h >> 24) & 0xFF])
+    out[26:28] = bytes([1, 0])
+    out[28:30] = bytes([24, 0])
+    out[34:38] = bytes([(w * h * 3) & 0xFF, ((w * h * 3) >> 8) & 0xFF, ((w * h * 3) >> 16) & 0xFF, ((w * h * 3) >> 24) & 0xFF])
+
+    pixels = list(img.getdata())
+    pos = 54
+    for row_idx in range(h - 1, -1, -1):
+        for col in range(w):
+            r, g, b = pixels[row_idx * w + col]
+            out[pos : pos + 3] = bytes([b, g, r])
+            pos += 3
+        pos += stride - w * 3
+
+    return bytes(out)

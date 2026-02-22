@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List
 
+import time
 from flask import Blueprint, jsonify, request, render_template
 
 from ..ble.service import LedBleService
@@ -10,6 +11,7 @@ from ..commands.high_level import (
     cmd_power_payload,
     cmd_brightness_payload_fixed,
     cmd_brightness_payload_schedule,
+    cmd_delete_programs,
     rt_show_text_payloads,
     rt_show_gif_payloads,
     rt_show_image_payloads,
@@ -99,6 +101,29 @@ def make_blueprint(*, ble: LedBleService | None, settings: Settings) -> Blueprin
         except Exception as e:
             return jsonify({"ok": False, "error": str(e)}), 500
 
+    @bp.post("/api/clear")
+    def api_clear():
+        """Delete programs from the panel. Use before sending new content to avoid
+        old pages reverting. del_ids: 1-based program IDs (default [1..60] clears all)."""
+        if not ble:
+            return jsonify({"ok": False, "error": "DEVICE_ADDRESS not set"}), 500
+        body = request.get_json(force=True, silent=True) or {}
+        del_ids = body.get("del_ids")
+        if del_ids is None:
+            del_ids = list(range(1, 61))
+        elif isinstance(del_ids, int):
+            del_ids = [del_ids]
+        else:
+            del_ids = [int(x) for x in del_ids]
+        try:
+            if not ble.is_connected():
+                ble.connect()
+            payload = cmd_delete_programs(del_ids=del_ids)
+            ble.send_payload(flags=settings.rt_show_flags, msg_type=settings.rt_show_type, payload=payload)
+            return jsonify({"ok": True, "del_ids": del_ids, "payload_hex": payload.hex()})
+        except Exception as e:
+            return jsonify({"ok": False, "error": str(e)}), 500
+
     @bp.post("/api/text")
     def api_text():
         if not ble:
@@ -112,10 +137,17 @@ def make_blueprint(*, ble: LedBleService | None, settings: Settings) -> Blueprin
             if not ble.is_connected():
                 ble.connect()
 
+            clear_before_send = bool(body.get("clear_before_send", False))
+            id_pro = int(body.get("id_pro", 1))
+            if clear_before_send:
+                payload = cmd_delete_programs(del_ids=[id_pro])
+                ble.send_payload(flags=settings.rt_show_flags, msg_type=settings.rt_show_type, payload=payload)
+                time.sleep(0.1)
+
             payloads = rt_show_text_payloads(
                 settings=settings,
                 text=text,
-                id_pro=int(body.get("id_pro", 1)),
+                id_pro=id_pro,
                 id_rect=int(body.get("id_rect", 1)),
                 id_item=int(body.get("id_item", 1)),
                 data_save=int(body.get("data_save", 0)),
@@ -143,13 +175,16 @@ def make_blueprint(*, ble: LedBleService | None, settings: Settings) -> Blueprin
 
             play_loop = int(body.get("play_loop", 1)) if str(body.get("play_loop", "")).strip() != "" else 1
             dispatch_payload = build_dispatch_play_payload(
-                id_pro=int(body.get("id_pro", 1)),
+                id_pro=id_pro,
                 play_loop=play_loop,
                 ignore_pgm_cmd=int(body.get("ignore_pgm_cmd", 0)),
             )
             ble.send_payload(flags=settings.rt_show_flags, msg_type=settings.rt_show_type, payload=dispatch_payload)
 
-            return jsonify({"ok": True, "sent_count": len(res) + 1, "sent": res + [{"sno": None, "frame_len": len(dispatch_payload), "kind": "dispatch_play"}]})
+            sent_list = res + [{"sno": None, "frame_len": len(dispatch_payload), "kind": "dispatch_play"}]
+            if clear_before_send:
+                sent_list.insert(0, {"sno": None, "kind": "clear_program", "del_ids": [id_pro]})
+            return jsonify({"ok": True, "sent_count": len(sent_list), "sent": sent_list})
         except Exception as e:
             return jsonify({"ok": False, "error": str(e)}), 500
 
@@ -182,10 +217,15 @@ def make_blueprint(*, ble: LedBleService | None, settings: Settings) -> Blueprin
         try:
             if not ble.is_connected():
                 ble.connect()
+            id_pro = int(request.form.get("id_pro", 1))
+            if request.form.get("clear_before_send", "0") in ("1", "true", "yes"):
+                payload = cmd_delete_programs(del_ids=[id_pro])
+                ble.send_payload(flags=settings.rt_show_flags, msg_type=settings.rt_show_type, payload=payload)
+                time.sleep(0.1)
             payloads = rt_show_gif_payloads(
                 settings=settings,
                 gif_bytes=b,
-                id_pro=int(request.form.get("id_pro", 1)),
+                id_pro=id_pro,
                 id_rect=int(request.form.get("id_rect", 1)),
                 id_item=int(request.form.get("id_item", 1)),
                 data_save=int(request.form.get("data_save", 0)),
@@ -194,7 +234,9 @@ def make_blueprint(*, ble: LedBleService | None, settings: Settings) -> Blueprin
             )
             msg_type = int(request.form.get("msg_type", settings.rt_show_type))
             res = ble.send_many_payloads(flags=settings.rt_show_flags, msg_type=msg_type, payloads=payloads)
-            return jsonify({"ok": True, "sent_count": len(res), "sent": res})
+            dispatch_payload = build_dispatch_play_payload(id_pro=id_pro, play_loop=int(request.form.get("play_loop", 1)))
+            ble.send_payload(flags=settings.rt_show_flags, msg_type=settings.rt_show_type, payload=dispatch_payload)
+            return jsonify({"ok": True, "sent_count": len(res) + 1, "sent": res + [{"kind": "dispatch_play"}]})
         except Exception as e:
             return jsonify({"ok": False, "error": str(e)}), 500
 
@@ -208,12 +250,17 @@ def make_blueprint(*, ble: LedBleService | None, settings: Settings) -> Blueprin
         try:
             if not ble.is_connected():
                 ble.connect()
+            id_pro = int(request.form.get("id_pro", 1))
+            if request.form.get("clear_before_send", "0") in ("1", "true", "yes"):
+                payload = cmd_delete_programs(del_ids=[id_pro])
+                ble.send_payload(flags=settings.rt_show_flags, msg_type=settings.rt_show_type, payload=payload)
+                time.sleep(0.1)
             payloads = rt_show_image_payloads(
                 settings=settings,
                 image_bytes=b,
-                mode=str(request.form.get("mode", "gif")),
+                mode=str(request.form.get("mode", "bmp")),
                 target_size=(int(request.form.get("w", 64)), int(request.form.get("h", 64))) if request.form.get("w") or request.form.get("h") else (64, 64),
-                id_pro=int(request.form.get("id_pro", 1)),
+                id_pro=id_pro,
                 id_rect=int(request.form.get("id_rect", 1)),
                 id_item=int(request.form.get("id_item", 1)),
                 data_save=int(request.form.get("data_save", 0)),
@@ -222,7 +269,9 @@ def make_blueprint(*, ble: LedBleService | None, settings: Settings) -> Blueprin
             )
             msg_type = int(request.form.get("msg_type", settings.rt_show_type))
             res = ble.send_many_payloads(flags=settings.rt_show_flags, msg_type=msg_type, payloads=payloads)
-            return jsonify({"ok": True, "sent_count": len(res), "sent": res})
+            dispatch_payload = build_dispatch_play_payload(id_pro=id_pro, play_loop=int(request.form.get("play_loop", 1)))
+            ble.send_payload(flags=settings.rt_show_flags, msg_type=settings.rt_show_type, payload=dispatch_payload)
+            return jsonify({"ok": True, "sent_count": len(res) + 1, "sent": res + [{"kind": "dispatch_play"}]})
         except Exception as e:
             return jsonify({"ok": False, "error": str(e)}), 500
 

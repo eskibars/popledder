@@ -90,6 +90,7 @@
         <div class="row">
           <button id="btnPowerOn">Power On</button>
           <button id="btnPowerOff" class="secondary">Power Off</button>
+          <button id="btnClear" class="danger">Clear Panel</button>
         </div>
 
         <div class="row">
@@ -119,7 +120,8 @@
           <div>
             <div class="label">Mode</div>
             <select id="imgMode">
-              <option value="gif" selected>gif (most compatible)</option>
+              <option value="bmp" selected>bmp (graphics)</option>
+              <option value="gif">gif</option>
               <option value="rgb24">rgb24 (ystp01 raw)</option>
               <option value="palette">palette (ystp01 indexed)</option>
             </select>
@@ -136,6 +138,10 @@
         </div>
 
         <div class="row" style="margin-top:10px;">
+          <label class="pill" style="cursor:pointer;">
+            <input id="imgClearBeforeSend" type="checkbox" style="width:auto; margin:0;" />
+            <span class="small" style="margin:0;">Clear before send</span>
+          </label>
           <button id="btnSendImage">Send Image</button>
         </div>
 
@@ -208,6 +214,10 @@
           <label class="pill" style="cursor:pointer;">
             <input id="animEnable" type="checkbox" checked style="width:auto; margin:0;" />
             <span class="small" style="margin:0;">Enable animation</span>
+          </label>
+          <label class="pill" style="cursor:pointer;">
+            <input id="clearBeforeSend" type="checkbox" style="width:auto; margin:0;" />
+            <span class="small" style="margin:0;">Clear before send</span>
           </label>
           <button id="btnReloadAnims" class="secondary">Reload animations</button>
           <span class="small" id="animMeta" style="margin-left:auto;">—</span>
@@ -421,6 +431,18 @@
     }
   }
 
+  async function clearPanel() {
+    $("powerOut").textContent = "Clearing…";
+    try {
+      const r = await api("/api/clear", { method: "POST", body: JSON.stringify({}) });
+      $("powerOut").textContent = pretty(r);
+    } catch (e) {
+      $("powerOut").textContent = `Error: ${e.message}`;
+    } finally {
+      await refreshStatus();
+    }
+  }
+
   async function sendBrightness() {
     const value = Number($("brightness").value);
     $("powerOut").textContent = "Sending…";
@@ -601,6 +623,8 @@
       body.bg_color = hexToRgbInt($("singleBg").value);
     }
 
+    if ($("clearBeforeSend")?.checked) body.clear_before_send = true;
+
     // Animation (optional)
     const animOn = !!$("animEnable")?.checked;
     const animVal = $("animSelect")?.value || "";
@@ -657,6 +681,7 @@
     fd.append("mode", mode);
     fd.append("w", String(w));
     fd.append("h", String(h));
+    if ($("imgClearBeforeSend")?.checked) fd.append("clear_before_send", "1");
 
     try {
       const res = await fetch("/api/image", { method: "POST", body: fd });
@@ -677,6 +702,7 @@
 
   $("btnPowerOn").addEventListener("click", () => power(true));
   $("btnPowerOff").addEventListener("click", () => power(false));
+  $("btnClear").addEventListener("click", clearPanel);
 
   $("brightness").addEventListener("input", () => $("brightnessVal").textContent = $("brightness").value);
   $("btnBrightness").addEventListener("click", sendBrightness);
@@ -688,6 +714,7 @@
   });
   $("animSelect").addEventListener("change", updatePreview);
   $("animEnable").addEventListener("change", updatePreview);
+  $("clearBeforeSend")?.addEventListener("change", updatePreview);
   $("animStay").addEventListener("input", updatePreview);
   $("btnReloadAnims").addEventListener("click", loadTextAnimations);
 
