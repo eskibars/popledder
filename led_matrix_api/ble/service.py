@@ -117,7 +117,6 @@ class LedBleService:
             raise RuntimeError("Not connected")
         for chunk in iter_chunks(frame, self.settings.ble_write_chunk):
             await self._client.write_gatt_char(self.uuids.write, chunk, response=False)
-            await asyncio.sleep(0.015)
 
     def _next_sno(self) -> int:
         with self._lock:
@@ -156,6 +155,4 @@ class LedBleService:
         results: List[Dict[str, Any]] = []
         for i, p in enumerate(payloads):
             results.append(self.send_payload(flags=flags, msg_type=msg_type, payload=p))
-            if i < len(payloads) - 1:
-                time.sleep(0.05)
         return results

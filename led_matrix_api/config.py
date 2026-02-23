@@ -12,7 +12,7 @@ class BleUuids:
 @dataclass(frozen=True)
 class Settings:
     device_address: str
-    ble_write_chunk: int = 180
+    ble_write_chunk: int = 248
     stream_chunk: int = 960
 
     # Outer frame flags/type commonly used for rt_show
@@ -28,7 +28,7 @@ class Settings:
     def from_env() -> "Settings":
         return Settings(
             device_address=os.environ.get("DEVICE_ADDRESS", "").strip(),
-            ble_write_chunk=int(os.environ.get("BLE_WRITE_CHUNK", "180")),
+            ble_write_chunk=int(os.environ.get("BLE_WRITE_CHUNK", "248")),
             stream_chunk=int(os.environ.get("STREAM_CHUNK", "960")),
             host=os.environ.get("HOST", "0.0.0.0"),
             port=int(os.environ.get("PORT", "5000")),
